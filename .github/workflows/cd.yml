@@ -1,0 +1,65 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'uat'
+        type: choice
+        options:
+          - uat
+          - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build/Verify application
+        run: |
+          python -m py_compile app.py schema.py
+
+      - name: Deploy to UAT
+        if: (github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'uat') && github.event_name == 'workflow_dispatch'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          echo "Deploying to UAT environment"
+          # Add deployment commands here
+          # Example: rsync or scp to UAT server
+          # echo "$DEPLOY_KEY" > deploy_key && chmod 600 deploy_key
+          # scp -i deploy_key -r . $DEPLOY_USER@$DEPLOY_HOST:/path/to/uat
+
+      - name: Deploy to Production
+        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          echo "Deploying to Production environment"
+          # Add deployment commands here
+          # Example: rsync or scp to production server
