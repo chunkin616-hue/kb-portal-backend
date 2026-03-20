@@ -1,0 +1,9 @@
+flask==3.0.0
+flask-cors==4.0.0
+flask-graphql==1.4.1
+flask-sqlalchemy==3.1.1
+graphene>=2.1
+graphene-sqlalchemy==2.3.0
+sqlalchemy>=1.4,<2.0
+psycopg[binary]>=3.2
+gunicorn==21.2.0
