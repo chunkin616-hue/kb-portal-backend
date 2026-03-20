@@ -19,7 +19,7 @@ POSTGRES_PASSWORD = 'ken123456'
 # Initialize Flask app and SQLAlchemy
 app = Flask(__name__)
 # Use psycopg for PostgreSQL connection
-app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql+psycopg://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}'
+app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 

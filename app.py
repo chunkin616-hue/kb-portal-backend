@@ -400,7 +400,8 @@ def health():
     return jsonify({'status': 'ok', 'version': VERSION, 'port': 5003})
 
 if __name__ == '__main__':
-    print(f"🚀 Starting KB Portal Backend on port 5003...")
-    print(f"📚 GraphQL endpoint: http://localhost:5003/graphql")
+    port = int(os.environ.get('PORT', 5003))
+    print(f"🚀 Starting KB Portal Backend on port {port}...")
+    print(f"📚 GraphQL endpoint: http://localhost:{port}/graphql")
     print(f"🔐 Login: admin / afe2026")
-    app.run(host='0.0.0.0', port=5003, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
