@@ -1,7 +1,19 @@
 name: Deploy Backend
+
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - uat
+          - production
 
 permissions:
   contents: write
@@ -9,7 +21,27 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Set deployment target
+        run: |
+          case ${{ env.ENVIRONMENT }} in
+            dev)
+              echo "DEPLOY_PORT=5003" >> $GITHUB_ENV
+              echo "Deploying to DEV environment (port 5003)"
+              ;;
+            uat)
+              echo "DEPLOY_PORT=5004" >> $GITHUB_ENV
+              echo "Deploying to UAT environment (port 5004)"
+              ;;
+            production)
+              echo "DEPLOY_PORT=5005" >> $GITHUB_ENV
+              echo "Deploying to Production environment (port 5005)"
+              ;;
+          esac
+      
       - name: Deploy to server
-        run: echo "Deploying to 192.168.140.149:5003"
+        run: echo "Deploying to 192.168.140.149:${{ env.DEPLOY_PORT }}"

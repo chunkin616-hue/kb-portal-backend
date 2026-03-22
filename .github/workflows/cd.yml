@@ -25,6 +25,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     outputs:
       deployed: ${{ steps.deploy_marker.outputs.deployed }}
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || 'uat' }}
     
     steps:
       - name: Checkout code
@@ -45,19 +47,32 @@ jobs:
         run: |
           python -m py_compile app.py schema.py
 
+      - name: Set deployment port
+        run: |
+          case ${{ env.ENVIRONMENT }} in
+            uat)
+              echo "DEPLOY_PORT=5004" >> $GITHUB_ENV
+              ;;
+            production)
+              echo "DEPLOY_PORT=5005" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "DEPLOY_PORT=5003" >> $GITHUB_ENV
+              ;;
+          esac
+
       - name: Create deployment marker
         id: deploy_marker
         run: |
           DEPLOY_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          ENVIRONMENT=${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || 'uat' }}
           
           echo "### Backend Deployment Info" > deployment-info.md
-          echo "**Environment:** $ENVIRONMENT" >> deployment-info.md
+          echo "**Environment:** ${{ env.ENVIRONMENT }}" >> deployment-info.md
           echo "**Deployed at:** $DEPLOY_TIME" >> deployment-info.md
           echo "**Commit:** ${{ github.sha }}" >> deployment-info.md
           echo "**Branch:** ${{ github.ref }}" >> deployment-info.md
           echo "**Runner:** ${{ runner.os }}" >> deployment-info.md
-          echo "**Port:** 5003" >> deployment-info.md
+          echo "**Port:** ${{ env.DEPLOY_PORT }}" >> deployment-info.md
           
           echo "deployed=true" >> $GITHUB_OUTPUT
 
@@ -76,7 +91,7 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
-          echo "Deploying to UAT environment"
+          echo "Deploying to UAT environment (port 5004)"
           # Add deployment commands here
           # Example: rsync or scp to UAT server
           # echo "$DEPLOY_KEY" > deploy_key && chmod 600 deploy_key
@@ -89,6 +104,6 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
-          echo "Deploying to Production environment"
+          echo "Deploying to Production environment (port 5005)"
           # Add deployment commands here
           # Example: rsync or scp to production server
