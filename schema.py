@@ -99,6 +99,20 @@ class TagObject(SQLAlchemyObjectType):
         model = Tag
         interfaces = (graphene.relay.Node,)
 
+# Authentication decorator for GraphQL
+def require_login(func):
+    """Decorator to require login for GraphQL resolvers"""
+    from functools import wraps
+    from flask import session
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Check if user is logged in via session
+        if not session.get('logged_in'):
+            raise Exception('Authentication required')
+        return func(*args, **kwargs)
+    return wrapper
+
 # Define Queries
 class Query(graphene.ObjectType):
     all_articles = SQLAlchemyConnectionField(ArticleObject)
@@ -117,15 +131,23 @@ class Query(graphene.ObjectType):
     all_revisions = SQLAlchemyConnectionField(ArticleRevisionObject)
     revisions_by_article = SQLAlchemyConnectionField(ArticleRevisionObject, article_id=graphene.Int())
 
+    @require_login
+    def resolve_all_articles(self, info, **kwargs):
+        return Article.query
+    
+    @require_login
     def resolve_article(self, info, id):
         return Article.query.get(id)
     
+    @require_login
     def resolve_articles_by_category(self, info, category_id):
         return Article.query.filter_by(category_id=category_id).all()
     
+    @require_login
     def resolve_articles_by_tag(self, info, tag):
         return Article.query.filter(Article.tags.contains(tag)).all()
     
+    @require_login
     def resolve_search_articles(self, info, query):
         search = f"%{query}%"
         return Article.query.filter(
@@ -133,15 +155,31 @@ class Query(graphene.ObjectType):
             (Article.content.ilike(search))
         ).all()
     
+    @require_login
+    def resolve_all_categories(self, info, **kwargs):
+        return Category.query
+    
+    @require_login
     def resolve_category(self, info, id):
         return Category.query.get(id)
     
+    @require_login
+    def resolve_all_tags(self, info, **kwargs):
+        return Tag.query
+    
+    @require_login
     def resolve_tag(self, info, id):
         return Tag.query.get(id)
     
+    @require_login
     def resolve_tag_by_name(self, info, name):
         return Tag.query.filter_by(name=name).first()
     
+    @require_login
+    def resolve_all_revisions(self, info, **kwargs):
+        return ArticleRevision.query
+    
+    @require_login
     def resolve_revisions_by_article(self, info, article_id):
         return ArticleRevision.query.filter_by(article_id=article_id).order_by(ArticleRevision.created_at.desc()).all()
 
@@ -155,6 +193,7 @@ class CreateCategory(graphene.Mutation):
     category = graphene.Field(CategoryObject)
     
     @staticmethod
+    @require_login
     def mutate(root, info, name, description=None, parent_id=None):
         category = Category(name=name, description=description, parent_id=parent_id)
         db.session.add(category)
@@ -170,6 +209,7 @@ class UpdateCategory(graphene.Mutation):
     category = graphene.Field(CategoryObject)
     
     @staticmethod
+    @require_login
     def mutate(root, info, id, name=None, description=None):
         category = Category.query.get(id)
         if category:
@@ -188,6 +228,7 @@ class DeleteCategory(graphene.Mutation):
     success = graphene.Boolean()
     
     @staticmethod
+    @require_login
     def mutate(root, info, id):
         category = Category.query.get(id)
         if category:
@@ -208,6 +249,7 @@ class CreateArticle(graphene.Mutation):
     article = graphene.Field(ArticleObject)
     
     @staticmethod
+    @require_login
     def mutate(root, info, title, content=None, category_id=None, author=None, status='draft', tags=None):
         # Sanitize inputs to prevent XSS
         sanitized_title = sanitize_input(title)
@@ -251,6 +293,7 @@ class UpdateArticle(graphene.Mutation):
     article = graphene.Field(ArticleObject)
     
     @staticmethod
+    @require_login
     def mutate(root, info, id, title=None, content=None, category_id=None, status=None, tags=None, revision_note=None):
         article = Article.query.get(id)
         if article:
@@ -295,6 +338,7 @@ class DeleteArticle(graphene.Mutation):
     success = graphene.Boolean()
     
     @staticmethod
+    @require_login
     def mutate(root, info, id):
         article = Article.query.get(id)
         if article:
@@ -313,6 +357,7 @@ class CreateTag(graphene.Mutation):
     tag = graphene.Field(TagObject)
     
     @staticmethod
+    @require_login
     def mutate(root, info, name, description=None):
         tag = Tag(name=name, description=description)
         db.session.add(tag)
@@ -326,6 +371,7 @@ class DeleteTag(graphene.Mutation):
     success = graphene.Boolean()
     
     @staticmethod
+    @require_login
     def mutate(root, info, id):
         tag = Tag.query.get(id)
         if tag:

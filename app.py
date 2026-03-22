@@ -5,15 +5,14 @@ KB Portal Backend with GraphQL API
 Port: 5003
 """
 
-from flask import Flask, render_template_string, request, redirect, url_for, g, session, jsonify, send_from_directory
+from flask import Flask, render_template_string, request, redirect, url_for, g, session, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 from flask_graphql import GraphQLView
 import os
-from datetime import datetime, timedelta
-import jwt
+from datetime import datetime
 
 # Import GraphQL schema
-from schema import app as flask_app, db, schema, sanitize_input
+from schema import app as flask_app, db, schema
 
 app = flask_app
 CORS(app, supports_credentials=True, 
@@ -26,31 +25,7 @@ CORS(app, supports_credentials=True,
      expose_headers=['Set-Cookie'],
      allow_headers=['Content-Type', 'Authorization'])
 
-# Simple CSRF token for API (manual implementation)
-import secrets
-API_CSRF_TOKENS = set()
-
-@app.route('/api/csrf-token')
-def csrf_token():
-    token = secrets.token_hex(32)
-    API_CSRF_TOKENS.add(token)
-    return jsonify({'csrf_token': token})
-
-def verify_csrf_token(token):
-    return token in API_CSRF_TOKENS
-
 app.secret_key = 'kb_portal_secret_key_2026'
-
-# JWT Configuration
-JWT_SECRET_KEY = 'kb_portal_jwt_secret_key_2026'
-JWT_ALGORITHM = 'HS256'
-JWT_EXPIRATION_HOURS = 24
-
-# Configure session cookie
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_PATH'] = '/'
-app.config['SESSION_COOKIE_SECURE'] = False  # Set True in production with HTTPS
 
 VERSION = "v1.0.0"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -58,8 +33,26 @@ BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "afe2026"
 
-# Add GraphQL endpoint
-app.add_url_rule('/graphql', view_func=GraphQLView.as_view(
+# Import JWT authentication
+from jwt_auth import jwt_required, generate_token, verify_token
+
+# Add GraphQL endpoint with authentication
+class AuthGraphQLView(GraphQLView):
+    def dispatch_request(self):
+        # Skip auth check for introspection queries (needed for GraphiQL)
+        if request.method == 'POST' and request.is_json:
+            data = request.get_json()
+            query = data.get('query', '')
+            
+            # Allow introspection queries without auth (for GraphiQL)
+            is_introspection = 'IntrospectionQuery' in query or '__schema' in query
+            
+            if not is_introspection and not session.get('logged_in'):
+                return jsonify({'errors': [{'message': 'Authentication required. Please login first.'}]})
+        
+        return super().dispatch_request()
+
+app.add_url_rule('/graphql', view_func=AuthGraphQLView.as_view(
     'graphql',
     schema=schema,
     graphiql=True
@@ -372,19 +365,44 @@ def index():
 def login():
     error = None
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        # Check if request is JSON
+        if request.is_json:
+            data = request.get_json()
+            username = data.get('username')
+            password = data.get('password')
+        else:
+            # Form data
+            username = request.form.get('username')
+            password = request.form.get('password')
         
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            # Set session for traditional login (for GraphQL and web interface)
             session['logged_in'] = True
             session['username'] = username
-            # Check if AJAX request (API call from frontend)
-            if request.headers.get('Origin') or request.is_json:
-                return jsonify({'success': True, 'redirect': '/'}), 200
-            return redirect('/')
+            
+            # Generate JWT token for REST API
+            token = generate_token(username)
+            
+            # Return JSON response for API requests
+            if request.is_json or request.args.get('api') == 'true':
+                return jsonify({
+                    'success': True,
+                    'token': token,
+                    'user': {'username': username}
+                })
+            
+            # For web form login, set token in cookie and redirect
+            response = make_response(redirect('/'))
+            response.set_cookie('kb_token', token, httponly=True, samesite='Lax')
+            return response
         else:
             error = 'Invalid username or password'
+            
+            # Return JSON error for API requests
+            if request.is_json or request.args.get('api') == 'true':
+                return jsonify({'success': False, 'error': error}), 401
     
+    # For GET requests, render login page
     return render_template_string(LOGIN_TEMPLATE, version=VERSION, build_date=BUILD_DATE, error=error)
 
 @app.route('/logout')
@@ -393,374 +411,289 @@ def logout():
     return redirect('/login')
 
 # API endpoints for Next.js frontend
-@app.route('/api/articles')
+@app.route('/api/articles', methods=['GET', 'POST'])
+@jwt_required
 def api_articles():
     from schema import Article, Category, Tag
-    # Support filtering by search, category
-    search = request.args.get('search', '')
-    category_id = request.args.get('category')
-    status = request.args.get('status', '')
     
-    query = Article.query
+    if request.method == 'GET':
+        articles = Article.query.order_by(Article.updated_at.desc()).all()
+        return jsonify([{
+            'id': a.id,
+            'title': a.title,
+            'content': a.content,
+            'author': a.author,
+            'status': a.status,
+            'tags': a.tags,
+            'viewCount': a.view_count,
+            'categoryId': a.category_id,
+            'createdAt': a.created_at,
+            'updatedAt': a.updated_at
+        } for a in articles])
     
-    if search:
-        query = query.filter(Article.title.ilike(f'%{search}%'))
-    if category_id:
-        query = query.filter(Article.category_id == category_id)
-    if status:
-        query = query.filter(Article.status == status)
-    
-    articles = query.order_by(Article.updated_at.desc()).all()
-    return jsonify([{
-        'id': a.id,
-        'title': a.title,
-        'content': a.content,
-        'author': a.author,
-        'status': a.status,
-        'tags': a.tags,
-        'viewCount': a.view_count,
-        'categoryId': a.category_id,
-        'createdAt': a.created_at,
-        'updatedAt': a.updated_at
-    } for a in articles])
+    elif request.method == 'POST':
+        # Create new article
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Validate required fields
+        if not data.get('title'):
+            return jsonify({'error': 'Title is required'}), 400
+        
+        article = Article(
+            title=data['title'],
+            content=data.get('content', ''),
+            author=data.get('author', ''),
+            status=data.get('status', 'draft'),
+            tags=data.get('tags', ''),
+            category_id=data.get('categoryId'),
+            view_count=0
+        )
+        
+        db.session.add(article)
+        db.session.commit()
+        
+        return jsonify({
+            'id': article.id,
+            'title': article.title,
+            'content': article.content,
+            'author': article.author,
+            'status': article.status,
+            'tags': article.tags,
+            'viewCount': article.view_count,
+            'categoryId': article.category_id,
+            'createdAt': article.created_at,
+            'updatedAt': article.updated_at
+        }), 201
 
-# CRUD: Get single article
-@app.route('/api/articles/<int:article_id>')
-def api_article_detail(article_id):
+@app.route('/api/articles/<int:article_id>', methods=['GET', 'PUT', 'DELETE'])
+@jwt_required
+def api_article(article_id):
     from schema import Article
+    
     article = Article.query.get(article_id)
     if not article:
         return jsonify({'error': 'Article not found'}), 404
-    return jsonify({
-        'id': article.id,
-        'title': article.title,
-        'content': article.content,
-        'author': article.author,
-        'status': article.status,
-        'tags': article.tags,
-        'viewCount': article.view_count,
-        'categoryId': article.category_id,
-        'createdAt': article.created_at,
-        'updatedAt': article.updated_at
-    })
+    
+    if request.method == 'GET':
+        return jsonify({
+            'id': article.id,
+            'title': article.title,
+            'content': article.content,
+            'author': article.author,
+            'status': article.status,
+            'tags': article.tags,
+            'viewCount': article.view_count,
+            'categoryId': article.category_id,
+            'createdAt': article.created_at,
+            'updatedAt': article.updated_at
+        })
+    
+    elif request.method == 'PUT':
+        # Update article
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        if 'title' in data:
+            article.title = data['title']
+        if 'content' in data:
+            article.content = data['content']
+        if 'author' in data:
+            article.author = data['author']
+        if 'status' in data:
+            article.status = data['status']
+        if 'tags' in data:
+            article.tags = data['tags']
+        if 'categoryId' in data:
+            article.category_id = data['categoryId']
+        
+        db.session.commit()
+        
+        return jsonify({
+            'id': article.id,
+            'title': article.title,
+            'content': article.content,
+            'author': article.author,
+            'status': article.status,
+            'tags': article.tags,
+            'viewCount': article.view_count,
+            'categoryId': article.category_id,
+            'createdAt': article.created_at,
+            'updatedAt': article.updated_at
+        })
+    
+    elif request.method == 'DELETE':
+        db.session.delete(article)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Article deleted'})
 
-# CRUD: Create new article
-@app.route('/api/articles', methods=['POST'])
-def api_create_article():
-    from schema import Article, db
-    data = request.get_json()
-    
-    if not data.get('title'):
-        return jsonify({'error': 'Title is required'}), 400
-    
-    # Sanitize inputs to prevent XSS
-    sanitized_title = sanitize_input(data.get('title', ''))
-    sanitized_content = sanitize_input(data.get('content', '')) if data.get('content') else ''
-    sanitized_tags = sanitize_input(data.get('tags', '')) if data.get('tags') else ''
-    
-    article = Article(
-        title=sanitized_title,
-        content=sanitized_content,
-        author=data.get('author', 'admin'),
-        status=data.get('status', 'draft'),
-        tags=sanitized_tags,
-        category_id=data.get('categoryId'),
-        view_count=0
-    )
-    
-    db.session.add(article)
-    db.session.commit()
-    
-    return jsonify({
-        'id': article.id,
-        'title': article.title,
-        'content': article.content,
-        'author': article.author,
-        'status': article.status,
-        'tags': article.tags,
-        'viewCount': article.view_count,
-        'categoryId': article.category_id,
-        'createdAt': article.created_at,
-        'updatedAt': article.updated_at
-    }), 201
-
-# CRUD: Update article
-@app.route('/api/articles/<int:article_id>', methods=['PUT'])
-def api_update_article(article_id):
-    from schema import Article, db
-    article = Article.query.get(article_id)
-    
-    if not article:
-        return jsonify({'error': 'Article not found'}), 404
-    
-    data = request.get_json()
-    
-    # Sanitize inputs to prevent XSS
-    if data.get('title'):
-        article.title = sanitize_input(data['title'])
-    if 'content' in data:
-        article.content = sanitize_input(data['content']) if data['content'] else ''
-    if 'author' in data:
-        article.author = data['author']
-    if 'status' in data:
-        article.status = data['status']
-    if 'tags' in data:
-        article.tags = sanitize_input(data['tags']) if data['tags'] else ''
-    if 'categoryId' in data:
-        article.category_id = data['categoryId']
-    
-    db.session.commit()
-    
-    return jsonify({
-        'id': article.id,
-        'title': article.title,
-        'content': article.content,
-        'author': article.author,
-        'status': article.status,
-        'tags': article.tags,
-        'viewCount': article.view_count,
-        'categoryId': article.category_id,
-        'createdAt': article.created_at,
-        'updatedAt': article.updated_at
-    })
-
-# CRUD: Delete article
-@app.route('/api/articles/<int:article_id>', methods=['DELETE'])
-def api_delete_article(article_id):
-    from schema import Article, ArticleRevision, db
-    article = Article.query.get(article_id)
-    
-    if not article:
-        return jsonify({'error': 'Article not found'}), 404
-    
-    # Delete revisions first (due to foreign key constraint)
-    ArticleRevision.query.filter_by(article_id=article_id).delete()
-    
-    db.session.delete(article)
-    db.session.commit()
-    
-    return jsonify({'success': True, 'message': 'Article deleted successfully'}), 200
-
-@app.route('/api/categories')
+@app.route('/api/categories', methods=['GET', 'POST'])
+@jwt_required
 def api_categories():
     from schema import Category
-    categories = Category.query.all()
-    return jsonify([{
-        'id': c.id,
-        'name': c.name,
-        'description': c.description,
-        'parentId': c.parent_id
-    } for c in categories])
+    
+    if request.method == 'GET':
+        categories = Category.query.all()
+        return jsonify([{
+            'id': c.id,
+            'name': c.name,
+            'description': c.description,
+            'parentId': c.parent_id
+        } for c in categories])
+    
+    elif request.method == 'POST':
+        # Create new category
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        if not data.get('name'):
+            return jsonify({'error': 'Name is required'}), 400
+        
+        category = Category(
+            name=data['name'],
+            description=data.get('description', ''),
+            parent_id=data.get('parentId')
+        )
+        
+        db.session.add(category)
+        db.session.commit()
+        
+        return jsonify({
+            'id': category.id,
+            'name': category.name,
+            'description': category.description,
+            'parentId': category.parent_id
+        }), 201
 
-# CRUD: Get single category
-@app.route('/api/categories/<int:category_id>')
-def api_category_detail(category_id):
+@app.route('/api/categories/<int:category_id>', methods=['GET', 'PUT', 'DELETE'])
+@jwt_required
+def api_category(category_id):
     from schema import Category
+    
     category = Category.query.get(category_id)
     if not category:
         return jsonify({'error': 'Category not found'}), 404
-    return jsonify({
-        'id': category.id,
-        'name': category.name,
-        'description': category.description,
-        'parentId': category.parent_id
-    })
+    
+    if request.method == 'GET':
+        return jsonify({
+            'id': category.id,
+            'name': category.name,
+            'description': category.description,
+            'parentId': category.parent_id
+        })
+    
+    elif request.method == 'PUT':
+        # Update category
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        if 'name' in data:
+            category.name = data['name']
+        if 'description' in data:
+            category.description = data['description']
+        if 'parentId' in data:
+            category.parent_id = data['parentId']
+        
+        db.session.commit()
+        
+        return jsonify({
+            'id': category.id,
+            'name': category.name,
+            'description': category.description,
+            'parentId': category.parent_id
+        })
+    
+    elif request.method == 'DELETE':
+        db.session.delete(category)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Category deleted'})
 
-# CRUD: Create new category
-@app.route('/api/categories', methods=['POST'])
-def api_create_category():
-    from schema import Category, db
-    data = request.get_json()
-    
-    if not data.get('name'):
-        return jsonify({'error': 'Name is required'}), 400
-    
-    category = Category(
-        name=data.get('name'),
-        description=data.get('description', ''),
-        parent_id=data.get('parentId')
-    )
-    
-    db.session.add(category)
-    db.session.commit()
-    
-    return jsonify({
-        'id': category.id,
-        'name': category.name,
-        'description': category.description,
-        'parentId': category.parent_id
-    }), 201
-
-# CRUD: Update category
-@app.route('/api/categories/<int:category_id>', methods=['PUT'])
-def api_update_category(category_id):
-    from schema import Category, db
-    category = Category.query.get(category_id)
-    
-    if not category:
-        return jsonify({'error': 'Category not found'}), 404
-    
-    data = request.get_json()
-    
-    if data.get('name'):
-        category.name = data['name']
-    if 'description' in data:
-        category.description = data['description']
-    if 'parentId' in data:
-        category.parent_id = data['parentId']
-    
-    db.session.commit()
-    
-    return jsonify({
-        'id': category.id,
-        'name': category.name,
-        'description': category.description,
-        'parentId': category.parent_id
-    })
-
-# CRUD: Delete category
-@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
-def api_delete_category(category_id):
-    from schema import Category, db
-    category = Category.query.get(category_id)
-    
-    if not category:
-        return jsonify({'error': 'Category not found'}), 404
-    
-    db.session.delete(category)
-    db.session.commit()
-    
-    return '', 204
-
-@app.route('/api/tags')
+@app.route('/api/tags', methods=['GET', 'POST'])
+@jwt_required
 def api_tags():
     from schema import Tag
-    tags = Tag.query.all()
-    return jsonify([{
-        'id': t.id,
-        'name': t.name,
-        'description': t.description
-    } for t in tags])
-
-@app.route('/api/auth/status')
-def auth_status():
-    if session.get('logged_in', False):
+    
+    if request.method == 'GET':
+        tags = Tag.query.all()
+        return jsonify([{
+            'id': t.id,
+            'name': t.name,
+            'description': t.description
+        } for t in tags])
+    
+    elif request.method == 'POST':
+        # Create new tag
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        if not data.get('name'):
+            return jsonify({'error': 'Name is required'}), 400
+        
+        tag = Tag(
+            name=data['name'],
+            description=data.get('description', '')
+        )
+        
+        db.session.add(tag)
+        db.session.commit()
+        
         return jsonify({
-            'authenticated': True,
-            'username': session.get('username', 'admin')
+            'id': tag.id,
+            'name': tag.name,
+            'description': tag.description
+        }), 201
+
+@app.route('/api/tags/<int:tag_id>', methods=['GET', 'PUT', 'DELETE'])
+@jwt_required
+def api_tag(tag_id):
+    from schema import Tag
+    
+    tag = Tag.query.get(tag_id)
+    if not tag:
+        return jsonify({'error': 'Tag not found'}), 404
+    
+    if request.method == 'GET':
+        return jsonify({
+            'id': tag.id,
+            'name': tag.name,
+            'description': tag.description
         })
-    return jsonify({'authenticated': False}), 401
-
-
-# ==================== JWT Authentication Endpoints ====================
-
-def generate_jwt_token(username: str) -> str:
-    """Generate a JWT token for the given username."""
-    payload = {
-        'username': username,
-        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
-        'iat': datetime.utcnow()
-    }
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-
-
-def verify_jwt_token(token: str) -> dict | None:
-    """Verify and decode a JWT token. Returns payload if valid, None otherwise."""
-    try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-
-
-@app.route('/api/auth/login', methods=['POST'])
-def jwt_login():
-    """JWT-based login endpoint. Returns token in JSON response."""
-    data = request.get_json()
     
-    if not data:
-        return jsonify({'error': 'Invalid request'}), 400
-    
-    username = data.get('username')
-    password = data.get('password')
-    
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
-    
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        token = generate_jwt_token(username)
+    elif request.method == 'PUT':
+        # Update tag
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        if 'name' in data:
+            tag.name = data['name']
+        if 'description' in data:
+            tag.description = data['description']
+        
+        db.session.commit()
+        
         return jsonify({
-            'success': True,
-            'token': token,
-            'username': username,
-            'expiresIn': JWT_EXPIRATION_HOURS * 3600  # seconds
-        }), 200
-    else:
-        return jsonify({'error': 'Invalid username or password'}), 401
-
-
-@app.route('/api/auth/logout', methods=['POST'])
-def jwt_logout():
-    """JWT-based logout endpoint. Token invalidation is handled client-side."""
-    # For JWT, logout is handled client-side by removing the token
-    # This endpoint just confirms the logout action
-    return jsonify({'success': True, 'message': 'Logged out successfully'}), 200
-
-
-@app.route('/api/auth/verify', methods=['GET'])
-def jwt_verify():
-    """Verify JWT token from Authorization header."""
-    auth_header = request.headers.get('Authorization')
+            'id': tag.id,
+            'name': tag.name,
+            'description': tag.description
+        })
     
-    if not auth_header:
-        return jsonify({'authenticated': False, 'error': 'No authorization header'}), 401
-    
-    # Extract token from "Bearer <token>" format
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != 'bearer':
-        return jsonify({'authenticated': False, 'error': 'Invalid authorization header format'}), 401
-    
-    token = parts[1]
-    payload = verify_jwt_token(token)
-    
-    if payload:
-        return jsonify({
-            'authenticated': True,
-            'username': payload.get('username')
-        }), 200
-    else:
-        return jsonify({'authenticated': False, 'error': 'Invalid or expired token'}), 401
-
-# Stats endpoint
-@app.route('/api/stats')
-def api_stats():
-    from schema import Article, Category, Tag
-    articles = Article.query.all()
-    categories = Category.query.all()
-    tags = Tag.query.all()
-    
-    # Count by status
-    published = sum(1 for a in articles if a.status == 'published')
-    draft = sum(1 for a in articles if a.status == 'draft')
-    
-    return jsonify({
-        'totalArticles': len(articles),
-        'publishedArticles': published,
-        'draftArticles': draft,
-        'totalCategories': len(categories),
-        'totalTags': len(tags),
-        'totalViews': sum(a.view_count or 0 for a in articles)
-    })
+    elif request.method == 'DELETE':
+        db.session.delete(tag)
+        db.session.commit()
+        return jsonify({'success': True, 'message': 'Tag deleted'})
 
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'version': VERSION, 'port': 5003})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5003))
-    print(f"🚀 Starting KB Portal Backend on port {port}...")
-    print(f"📚 GraphQL endpoint: http://localhost:{port}/graphql")
+    print(f"🚀 Starting KB Portal Backend on port 5003...")
+    print(f"📚 GraphQL endpoint: http://localhost:5003/graphql")
     print(f"🔐 Login: admin / afe2026")
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=5003, debug=True)
