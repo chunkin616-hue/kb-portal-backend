@@ -16,6 +16,9 @@ on:
           - uat
           - production
 
+permissions:
+  contents: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
