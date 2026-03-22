@@ -20,6 +20,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    outputs:
+      deployed: ${{ steps.deploy_marker.outputs.deployed }}
     
     steps:
       - name: Checkout code
@@ -39,6 +41,30 @@ jobs:
       - name: Build/Verify application
         run: |
           python -m py_compile app.py schema.py
+
+      - name: Create deployment marker
+        id: deploy_marker
+        run: |
+          DEPLOY_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          ENVIRONMENT=${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || 'uat' }}
+          
+          echo "### Backend Deployment Info" > deployment-info.md
+          echo "**Environment:** $ENVIRONMENT" >> deployment-info.md
+          echo "**Deployed at:** $DEPLOY_TIME" >> deployment-info.md
+          echo "**Commit:** ${{ github.sha }}" >> deployment-info.md
+          echo "**Branch:** ${{ github.ref }}" >> deployment-info.md
+          echo "**Runner:** ${{ runner.os }}" >> deployment-info.md
+          echo "**Port:** 5003" >> deployment-info.md
+          
+          echo "deployed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit deployment info
+        run: |
+          git config user.name "CI/CD"
+          git config user.email "ci@afe.com"
+          git add deployment-info.md
+          git commit -m "Deploy Backend: ${{ github.sha }}" || echo "No changes to commit"
+          git push
 
       - name: Deploy to UAT
         if: (github.ref == 'refs/heads/develop' || github.event.inputs.environment == 'uat') && github.event_name == 'workflow_dispatch'
