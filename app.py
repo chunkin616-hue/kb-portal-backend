@@ -9,15 +9,43 @@ from flask import Flask, render_template_string, request, redirect, url_for, g, 
 from flask_cors import CORS
 from flask_graphql import GraphQLView
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import jwt
 
 # Import GraphQL schema
-from schema import app as flask_app, db, schema
+from schema import app as flask_app, db, schema, sanitize_input
 
 app = flask_app
-CORS(app, supports_credentials=True)
+CORS(app, supports_credentials=True, 
+     origins=['http://192.168.140.149:3003', 'http://localhost:3003', 'http://127.0.0.1:3003'],
+     expose_headers=['Set-Cookie'],
+     allow_headers=['Content-Type', 'Authorization'])
+
+# Simple CSRF token for API (manual implementation)
+import secrets
+API_CSRF_TOKENS = set()
+
+@app.route('/api/csrf-token')
+def csrf_token():
+    token = secrets.token_hex(32)
+    API_CSRF_TOKENS.add(token)
+    return jsonify({'csrf_token': token})
+
+def verify_csrf_token(token):
+    return token in API_CSRF_TOKENS
 
 app.secret_key = 'kb_portal_secret_key_2026'
+
+# JWT Configuration
+JWT_SECRET_KEY = 'kb_portal_jwt_secret_key_2026'
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRATION_HOURS = 24
+
+# Configure session cookie
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_PATH'] = '/'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set True in production with HTTPS
 
 VERSION = "v1.0.0"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
@@ -345,6 +373,9 @@ def login():
         if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
             session['logged_in'] = True
             session['username'] = username
+            # Check if AJAX request (API call from frontend)
+            if request.headers.get('Origin') or request.is_json:
+                return jsonify({'success': True, 'redirect': '/'}), 200
             return redirect('/')
         else:
             error = 'Invalid username or password'
@@ -360,7 +391,21 @@ def logout():
 @app.route('/api/articles')
 def api_articles():
     from schema import Article, Category, Tag
-    articles = Article.query.order_by(Article.updated_at.desc()).all()
+    # Support filtering by search, category
+    search = request.args.get('search', '')
+    category_id = request.args.get('category')
+    status = request.args.get('status', '')
+    
+    query = Article.query
+    
+    if search:
+        query = query.filter(Article.title.ilike(f'%{search}%'))
+    if category_id:
+        query = query.filter(Article.category_id == category_id)
+    if status:
+        query = query.filter(Article.status == status)
+    
+    articles = query.order_by(Article.updated_at.desc()).all()
     return jsonify([{
         'id': a.id,
         'title': a.title,
@@ -374,6 +419,123 @@ def api_articles():
         'updatedAt': a.updated_at
     } for a in articles])
 
+# CRUD: Get single article
+@app.route('/api/articles/<int:article_id>')
+def api_article_detail(article_id):
+    from schema import Article
+    article = Article.query.get(article_id)
+    if not article:
+        return jsonify({'error': 'Article not found'}), 404
+    return jsonify({
+        'id': article.id,
+        'title': article.title,
+        'content': article.content,
+        'author': article.author,
+        'status': article.status,
+        'tags': article.tags,
+        'viewCount': article.view_count,
+        'categoryId': article.category_id,
+        'createdAt': article.created_at,
+        'updatedAt': article.updated_at
+    })
+
+# CRUD: Create new article
+@app.route('/api/articles', methods=['POST'])
+def api_create_article():
+    from schema import Article, db
+    data = request.get_json()
+    
+    if not data.get('title'):
+        return jsonify({'error': 'Title is required'}), 400
+    
+    # Sanitize inputs to prevent XSS
+    sanitized_title = sanitize_input(data.get('title', ''))
+    sanitized_content = sanitize_input(data.get('content', '')) if data.get('content') else ''
+    sanitized_tags = sanitize_input(data.get('tags', '')) if data.get('tags') else ''
+    
+    article = Article(
+        title=sanitized_title,
+        content=sanitized_content,
+        author=data.get('author', 'admin'),
+        status=data.get('status', 'draft'),
+        tags=sanitized_tags,
+        category_id=data.get('categoryId'),
+        view_count=0
+    )
+    
+    db.session.add(article)
+    db.session.commit()
+    
+    return jsonify({
+        'id': article.id,
+        'title': article.title,
+        'content': article.content,
+        'author': article.author,
+        'status': article.status,
+        'tags': article.tags,
+        'viewCount': article.view_count,
+        'categoryId': article.category_id,
+        'createdAt': article.created_at,
+        'updatedAt': article.updated_at
+    }), 201
+
+# CRUD: Update article
+@app.route('/api/articles/<int:article_id>', methods=['PUT'])
+def api_update_article(article_id):
+    from schema import Article, db
+    article = Article.query.get(article_id)
+    
+    if not article:
+        return jsonify({'error': 'Article not found'}), 404
+    
+    data = request.get_json()
+    
+    # Sanitize inputs to prevent XSS
+    if data.get('title'):
+        article.title = sanitize_input(data['title'])
+    if 'content' in data:
+        article.content = sanitize_input(data['content']) if data['content'] else ''
+    if 'author' in data:
+        article.author = data['author']
+    if 'status' in data:
+        article.status = data['status']
+    if 'tags' in data:
+        article.tags = sanitize_input(data['tags']) if data['tags'] else ''
+    if 'categoryId' in data:
+        article.category_id = data['categoryId']
+    
+    db.session.commit()
+    
+    return jsonify({
+        'id': article.id,
+        'title': article.title,
+        'content': article.content,
+        'author': article.author,
+        'status': article.status,
+        'tags': article.tags,
+        'viewCount': article.view_count,
+        'categoryId': article.category_id,
+        'createdAt': article.created_at,
+        'updatedAt': article.updated_at
+    })
+
+# CRUD: Delete article
+@app.route('/api/articles/<int:article_id>', methods=['DELETE'])
+def api_delete_article(article_id):
+    from schema import Article, ArticleRevision, db
+    article = Article.query.get(article_id)
+    
+    if not article:
+        return jsonify({'error': 'Article not found'}), 404
+    
+    # Delete revisions first (due to foreign key constraint)
+    ArticleRevision.query.filter_by(article_id=article_id).delete()
+    
+    db.session.delete(article)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': 'Article deleted successfully'}), 200
+
 @app.route('/api/categories')
 def api_categories():
     from schema import Category
@@ -385,6 +547,86 @@ def api_categories():
         'parentId': c.parent_id
     } for c in categories])
 
+# CRUD: Get single category
+@app.route('/api/categories/<int:category_id>')
+def api_category_detail(category_id):
+    from schema import Category
+    category = Category.query.get(category_id)
+    if not category:
+        return jsonify({'error': 'Category not found'}), 404
+    return jsonify({
+        'id': category.id,
+        'name': category.name,
+        'description': category.description,
+        'parentId': category.parent_id
+    })
+
+# CRUD: Create new category
+@app.route('/api/categories', methods=['POST'])
+def api_create_category():
+    from schema import Category, db
+    data = request.get_json()
+    
+    if not data.get('name'):
+        return jsonify({'error': 'Name is required'}), 400
+    
+    category = Category(
+        name=data.get('name'),
+        description=data.get('description', ''),
+        parent_id=data.get('parentId')
+    )
+    
+    db.session.add(category)
+    db.session.commit()
+    
+    return jsonify({
+        'id': category.id,
+        'name': category.name,
+        'description': category.description,
+        'parentId': category.parent_id
+    }), 201
+
+# CRUD: Update category
+@app.route('/api/categories/<int:category_id>', methods=['PUT'])
+def api_update_category(category_id):
+    from schema import Category, db
+    category = Category.query.get(category_id)
+    
+    if not category:
+        return jsonify({'error': 'Category not found'}), 404
+    
+    data = request.get_json()
+    
+    if data.get('name'):
+        category.name = data['name']
+    if 'description' in data:
+        category.description = data['description']
+    if 'parentId' in data:
+        category.parent_id = data['parentId']
+    
+    db.session.commit()
+    
+    return jsonify({
+        'id': category.id,
+        'name': category.name,
+        'description': category.description,
+        'parentId': category.parent_id
+    })
+
+# CRUD: Delete category
+@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
+def api_delete_category(category_id):
+    from schema import Category, db
+    category = Category.query.get(category_id)
+    
+    if not category:
+        return jsonify({'error': 'Category not found'}), 404
+    
+    db.session.delete(category)
+    db.session.commit()
+    
+    return '', 204
+
 @app.route('/api/tags')
 def api_tags():
     from schema import Tag
@@ -394,6 +636,118 @@ def api_tags():
         'name': t.name,
         'description': t.description
     } for t in tags])
+
+@app.route('/api/auth/status')
+def auth_status():
+    if session.get('logged_in', False):
+        return jsonify({
+            'authenticated': True,
+            'username': session.get('username', 'admin')
+        })
+    return jsonify({'authenticated': False}), 401
+
+
+# ==================== JWT Authentication Endpoints ====================
+
+def generate_jwt_token(username: str) -> str:
+    """Generate a JWT token for the given username."""
+    payload = {
+        'username': username,
+        'exp': datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
+        'iat': datetime.utcnow()
+    }
+    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def verify_jwt_token(token: str) -> dict | None:
+    """Verify and decode a JWT token. Returns payload if valid, None otherwise."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def jwt_login():
+    """JWT-based login endpoint. Returns token in JSON response."""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'error': 'Invalid request'}), 400
+    
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        token = generate_jwt_token(username)
+        return jsonify({
+            'success': True,
+            'token': token,
+            'username': username,
+            'expiresIn': JWT_EXPIRATION_HOURS * 3600  # seconds
+        }), 200
+    else:
+        return jsonify({'error': 'Invalid username or password'}), 401
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def jwt_logout():
+    """JWT-based logout endpoint. Token invalidation is handled client-side."""
+    # For JWT, logout is handled client-side by removing the token
+    # This endpoint just confirms the logout action
+    return jsonify({'success': True, 'message': 'Logged out successfully'}), 200
+
+
+@app.route('/api/auth/verify', methods=['GET'])
+def jwt_verify():
+    """Verify JWT token from Authorization header."""
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header:
+        return jsonify({'authenticated': False, 'error': 'No authorization header'}), 401
+    
+    # Extract token from "Bearer <token>" format
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        return jsonify({'authenticated': False, 'error': 'Invalid authorization header format'}), 401
+    
+    token = parts[1]
+    payload = verify_jwt_token(token)
+    
+    if payload:
+        return jsonify({
+            'authenticated': True,
+            'username': payload.get('username')
+        }), 200
+    else:
+        return jsonify({'authenticated': False, 'error': 'Invalid or expired token'}), 401
+
+# Stats endpoint
+@app.route('/api/stats')
+def api_stats():
+    from schema import Article, Category, Tag
+    articles = Article.query.all()
+    categories = Category.query.all()
+    tags = Tag.query.all()
+    
+    # Count by status
+    published = sum(1 for a in articles if a.status == 'published')
+    draft = sum(1 for a in articles if a.status == 'draft')
+    
+    return jsonify({
+        'totalArticles': len(articles),
+        'publishedArticles': published,
+        'draftArticles': draft,
+        'totalCategories': len(categories),
+        'totalTags': len(tags),
+        'totalViews': sum(a.view_count or 0 for a in articles)
+    })
 
 @app.route('/health')
 def health():
