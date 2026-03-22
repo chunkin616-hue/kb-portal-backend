@@ -21,27 +21,38 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
       
       - name: Set deployment target
+        id: target
         run: |
-          case ${{ env.ENVIRONMENT }} in
+          case ${{ github.event.inputs.environment }} in
             dev)
-              echo "DEPLOY_PORT=5003" >> $GITHUB_ENV
+              echo "port=5003" >> $GITHUB_OUTPUT
               echo "Deploying to DEV environment (port 5003)"
               ;;
             uat)
-              echo "DEPLOY_PORT=5004" >> $GITHUB_ENV
+              echo "port=5004" >> $GITHUB_OUTPUT
               echo "Deploying to UAT environment (port 5004)"
               ;;
             production)
-              echo "DEPLOY_PORT=5005" >> $GITHUB_ENV
-              echo "Deploying to Production environment (port 5005)"
+              echo "port=5013" >> $GITHUB_OUTPUT
+              echo "Deploying to Production environment (port 5013)"
               ;;
           esac
       
-      - name: Deploy to server
-        run: echo "Deploying to 192.168.140.149:${{ env.DEPLOY_PORT }}"
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: 192.168.140.149
+          username: kenchan
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /Users/kenchan/.openclaw/workspace/kb-portal-backend
+            git pull origin main
+            npm install
+            npm run build
+            pm2 restart kb-backend-${{ github.event.inputs.environment }} || pm2 start npm --name kb-backend-${{ github.event.inputs.environment }} -- run start
+            pm2 save
