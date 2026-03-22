@@ -8,6 +8,17 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 import os
 from datetime import datetime
+import bleach
+
+# Allowed HTML tags for article content
+ALLOWED_TAGS = ['p', 'br', 'b', 'i', 'u', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'code', 'pre', 'blockquote']
+ALLOWED_ATTRIBUTES = {'a': ['href', 'title', 'class'], 'code': ['class'], 'pre': ['class']}
+
+def sanitize_input(text):
+    """Sanitize user input to prevent XSS attacks"""
+    if not text:
+        return text
+    return bleach.clean(text, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES, strip=True)
 
 # PostgreSQL connection settings
 POSTGRES_HOST = 'localhost'
@@ -198,13 +209,18 @@ class CreateArticle(graphene.Mutation):
     
     @staticmethod
     def mutate(root, info, title, content=None, category_id=None, author=None, status='draft', tags=None):
+        # Sanitize inputs to prevent XSS
+        sanitized_title = sanitize_input(title)
+        sanitized_content = sanitize_input(content) if content else None
+        sanitized_tags = sanitize_input(tags) if tags else None
+        
         article = Article(
-            title=title,
-            content=content,
+            title=sanitized_title,
+            content=sanitized_content,
             category_id=category_id,
             author=author,
             status=status,
-            tags=tags
+            tags=sanitized_tags
         )
         db.session.add(article)
         db.session.commit()
@@ -238,7 +254,14 @@ class UpdateArticle(graphene.Mutation):
     def mutate(root, info, id, title=None, content=None, category_id=None, status=None, tags=None, revision_note=None):
         article = Article.query.get(id)
         if article:
-            author = info.context.get('user', 'anonymous')
+            # Get user from Flask session instead of info.context.get()
+            from flask import session
+            author = session.get('user', 'anonymous')
+            
+            # Sanitize inputs to prevent XSS
+            sanitized_title = sanitize_input(title) if title else None
+            sanitized_content = sanitize_input(content) if content else None
+            sanitized_tags = sanitize_input(tags) if tags else None
             
             # Create revision before updating
             revision = ArticleRevision(
@@ -250,16 +273,16 @@ class UpdateArticle(graphene.Mutation):
             )
             db.session.add(revision)
             
-            if title:
-                article.title = title
-            if content is not None:
-                article.content = content
+            if sanitized_title:
+                article.title = sanitized_title
+            if sanitized_content is not None:
+                article.content = sanitized_content
             if category_id is not None:
                 article.category_id = category_id
             if status:
                 article.status = status
-            if tags:
-                article.tags = tags
+            if sanitized_tags:
+                article.tags = sanitized_tags
             article.updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             db.session.commit()
             

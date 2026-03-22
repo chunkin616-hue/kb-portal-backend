@@ -17,7 +17,12 @@ from schema import app as flask_app, db, schema, sanitize_input
 
 app = flask_app
 CORS(app, supports_credentials=True, 
-     origins=['http://192.168.140.149:3003', 'http://localhost:3003', 'http://127.0.0.1:3003'],
+     origins=[
+         # Dev environment
+         'http://192.168.140.149:3003', 'http://localhost:3003', 'http://127.0.0.1:3003',
+         # UAT environment
+         'http://192.168.140.149:3004', 'http://localhost:3004', 'http://127.0.0.1:3004',
+     ],
      expose_headers=['Set-Cookie'],
      allow_headers=['Content-Type', 'Authorization'])
 
