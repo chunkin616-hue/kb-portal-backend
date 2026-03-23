@@ -39,7 +39,7 @@ CORS(app, supports_credentials=True,
 
 app.secret_key = 'kb_portal_secret_key_2026'
 
-VERSION = "v1.0.1.20260323"
+VERSION = "v1.0.2"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 ADMIN_USERNAME = "admin"
@@ -699,6 +699,29 @@ def api_tag(tag_id):
         db.session.delete(tag)
         db.session.commit()
         return jsonify({'success': True, 'message': 'Tag deleted'})
+
+@app.route('/api/stats', methods=['GET'])
+@jwt_required
+def api_stats():
+    from schema import Article, Category, Tag
+    
+    total_articles = Article.query.count()
+    published_articles = Article.query.filter_by(status='published').count()
+    draft_articles = Article.query.filter_by(status='draft').count()
+    archived_articles = Article.query.filter_by(status='archived').count()
+    total_categories = Category.query.count()
+    total_tags = Tag.query.count()
+    total_views = db.session.query(db.func.sum(Article.view_count)).scalar() or 0
+    
+    return jsonify({
+        'totalArticles': total_articles,
+        'publishedArticles': published_articles,
+        'draftArticles': draft_articles,
+        'archivedArticles': archived_articles,
+        'totalCategories': total_categories,
+        'totalTags': total_tags,
+        'totalViews': total_views
+    })
 
 @app.route('/health')
 def health():

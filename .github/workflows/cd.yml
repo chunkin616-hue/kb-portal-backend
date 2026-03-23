@@ -93,10 +93,16 @@ jobs:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
           echo "Deploying to UAT environment (port 5004)"
-          # Add deployment commands here
-          # Example: rsync or scp to UAT server
-          # echo "$DEPLOY_KEY" > deploy_key && chmod 600 deploy_key
-          # scp -i deploy_key -r . $DEPLOY_USER@$DEPLOY_HOST:/path/to/uat
+          echo "$DEPLOY_KEY" > deploy_key && chmod 600 deploy_key
+          
+          # Copy backend files
+          scp -i deploy_key *.py *.txt *.md requirements.txt $DEPLOY_USER@$DEPLOY_HOST:/opt/kb-portal-backend/
+          scp -i deploy_key -r templates $DEPLOY_USER@$DEPLOY_HOST:/opt/kb-portal-backend/
+          
+          # Restart PM2 with correct environment
+          ssh -i deploy_key $DEPLOY_USER@$DEPLOY_HOST "cd /opt/kb-portal-backend && pm2 restart kb-backend-uat --env production"
+          
+          rm -f deploy_key
 
       - name: Deploy to Production
         if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
@@ -106,5 +112,13 @@ jobs:
           DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
         run: |
           echo "Deploying to Production environment (port 5005)"
-          # Add deployment commands here
-          # Example: rsync or scp to production server
+          echo "$DEPLOY_KEY" > deploy_key && chmod 600 deploy_key
+          
+          # Copy backend files
+          scp -i deploy_key *.py *.txt *.md requirements.txt $DEPLOY_USER@$DEPLOY_HOST:/opt/kb-portal-backend/
+          scp -i deploy_key -r templates $DEPLOY_USER@$DEPLOY_HOST:/opt/kb-portal-backend/
+          
+          # Restart PM2 with correct environment
+          ssh -i deploy_key $DEPLOY_USER@$DEPLOY_HOST "cd /opt/kb-portal-backend && pm2 restart kb-backend-prod --env production"
+          
+          rm -f deploy_key
