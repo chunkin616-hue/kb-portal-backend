@@ -2,8 +2,20 @@
 # CI Test trigger - $(date)
 """
 KB Portal Backend with GraphQL API
-Port: 5003
 """
+
+import os
+import sys
+
+# Determine port: CLI arg --port X, env PORT, or default 5003
+DEPLOY_PORT = 5003
+if '--port' in sys.argv:
+    idx = sys.argv.index('--port')
+    DEPLOY_PORT = int(sys.argv[idx + 1])
+elif os.environ.get('PORT'):
+    DEPLOY_PORT = int(os.environ.get('PORT'))
+elif os.environ.get('DEPLOY_PORT'):
+    DEPLOY_PORT = int(os.environ.get('DEPLOY_PORT'))
 
 from flask import Flask, render_template_string, request, redirect, url_for, g, session, jsonify, send_from_directory, make_response
 from flask_cors import CORS
@@ -27,7 +39,7 @@ CORS(app, supports_credentials=True,
 
 app.secret_key = 'kb_portal_secret_key_2026'
 
-VERSION = "v1.0.0"
+VERSION = "v1.0.1.20260323"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 ADMIN_USERNAME = "admin"
@@ -690,10 +702,10 @@ def api_tag(tag_id):
 
 @app.route('/health')
 def health():
-    return jsonify({'status': 'ok', 'version': VERSION, 'port': 5003})
+    return jsonify({'status': 'ok', 'version': VERSION, 'port': DEPLOY_PORT})
 
 if __name__ == '__main__':
-    print(f"🚀 Starting KB Portal Backend on port 5003...")
-    print(f"📚 GraphQL endpoint: http://localhost:5003/graphql")
+    print(f"🚀 Starting KB Portal Backend on port {DEPLOY_PORT}...")
+    print(f"📚 GraphQL endpoint: http://localhost:{DEPLOY_PORT}/graphql")
     print(f"🔐 Login: admin / afe2026")
-    app.run(host='0.0.0.0', port=5003, debug=True)
+    app.run(host='0.0.0.0', port=DEPLOY_PORT, debug=True)
