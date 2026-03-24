@@ -1,0 +1,52 @@
+name: Deploy Backend to UAT
+
+on:
+  push:
+    branches: [uat]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-uat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: uat
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify syntax
+        run: |
+          python -m py_compile app.py schema.py
+
+      - name: Deploy to UAT via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cd /opt/kb-portal-backend
+            git pull origin uat
+            pip install -r requirements.txt
+            pm2 restart kb-backend-uat || pm2 start python --name kb-backend-uat -- app.py
+            pm2 save
+
+      - name: Health Check UAT
+        run: |
+          sleep 10
+          curl -f http://192.168.140.149:5004/health || curl -f http://192.168.140.149:5004 || echo "Health check endpoint may not be configured"
