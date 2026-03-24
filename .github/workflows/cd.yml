@@ -23,11 +23,11 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/uat'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/uat' || github.ref == 'refs/heads/production'
     outputs:
       deployed: ${{ steps.deploy_marker.outputs.deployed }}
     env:
-      ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || 'uat' }}
+      ENVIRONMENT: ${{ github.event.inputs.environment || (github.ref == 'refs/heads/main' && 'production') || (github.ref == 'refs/heads/production' && 'production') || 'uat' }}
     
     steps:
       - name: Checkout code
@@ -105,7 +105,7 @@ jobs:
           rm -f deploy_key
 
       - name: Deploy to Production
-        if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production') && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
