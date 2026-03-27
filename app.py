@@ -735,4 +735,4 @@ if __name__ == '__main__':
     print(f"🚀 Starting KB Portal Backend on port {DEPLOY_PORT}...")
     print(f"📚 GraphQL endpoint: http://localhost:{DEPLOY_PORT}/graphql")
     print(f"🔐 Login: admin / afe2026")
-    app.run(host='127.0.0.1', port=DEPLOY_PORT, debug=False)
+    app.run(host='0.0.0.0', port=DEPLOY_PORT, debug=False)
