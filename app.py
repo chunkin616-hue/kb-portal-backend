@@ -39,7 +39,7 @@ CORS(app, supports_credentials=True,
 
 app.secret_key = 'kb_portal_secret_key_2026'
 
-VERSION = "v1.0.2"
+VERSION = "v1.0.3"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 ADMIN_USERNAME = "admin"
@@ -51,14 +51,18 @@ from jwt_auth import jwt_required, generate_token, verify_token
 # Add GraphQL endpoint with authentication
 class AuthGraphQLView(GraphQLView):
     def dispatch_request(self):
-        # Skip auth check for introspection queries (needed for GraphiQL)
+        # Block introspection queries from unauthenticated users (security fix)
         if request.method == 'POST' and request.is_json:
             data = request.get_json()
             query = data.get('query', '')
             
-            # Allow introspection queries without auth (for GraphiQL)
+            # Introspection queries must be from authenticated users
             is_introspection = 'IntrospectionQuery' in query or '__schema' in query
             
+            if is_introspection and not session.get('logged_in'):
+                return jsonify({'errors': [{'message': 'Authentication required for introspection.'}]})
+            
+            # All other queries also require authentication
             if not is_introspection and not session.get('logged_in'):
                 return jsonify({'errors': [{'message': 'Authentication required. Please login first.'}]})
         
@@ -731,4 +735,4 @@ if __name__ == '__main__':
     print(f"🚀 Starting KB Portal Backend on port {DEPLOY_PORT}...")
     print(f"📚 GraphQL endpoint: http://localhost:{DEPLOY_PORT}/graphql")
     print(f"🔐 Login: admin / afe2026")
-    app.run(host='0.0.0.0', port=DEPLOY_PORT, debug=True)
+    app.run(host='127.0.0.1', port=DEPLOY_PORT, debug=False)

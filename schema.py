@@ -335,7 +335,8 @@ class DeleteArticle(graphene.Mutation):
     class Arguments:
         id = graphene.Int(required=True)
     
-    success = graphene.Boolean()
+    ok = graphene.Boolean()
+    article = graphene.Field(ArticleObject)
     
     @staticmethod
     @require_login
@@ -346,8 +347,8 @@ class DeleteArticle(graphene.Mutation):
             ArticleRevision.query.filter_by(article_id=id).delete()
             db.session.delete(article)
             db.session.commit()
-            return DeleteArticle(success=True)
-        return DeleteArticle(success=False)
+            return DeleteArticle(ok=True, article=None)
+        return DeleteArticle(ok=False, article=None)
 
 class CreateTag(graphene.Mutation):
     class Arguments:
