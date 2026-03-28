@@ -486,7 +486,11 @@ def api_articles():
     from schema import Article, Category, Tag
     
     if request.method == 'GET':
-        articles = Article.query.order_by(Article.updated_at.desc()).all()
+        limit = request.args.get('limit', type=int)
+        query = Article.query.order_by(Article.updated_at.desc())
+        if limit is not None and limit > 0:
+            query = query.limit(limit)
+        articles = query.all()
         return jsonify([{
             'id': a.id,
             'title': a.title,
@@ -871,7 +875,13 @@ def health():
 
 @app.route('/api/health')
 def api_health():
-    return jsonify({'status': 'ok', 'version': VERSION, 'port': DEPLOY_PORT})
+    try:
+        # Test DB connectivity
+        db.session.execute(db.text('SELECT 1'))
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    return jsonify({'status': 'ok', 'version': VERSION, 'port': DEPLOY_PORT, 'db': db_status})
 
 if __name__ == '__main__':
     print(f"🚀 Starting KB Portal Backend on port {DEPLOY_PORT}...")
