@@ -22,6 +22,7 @@ from flask_cors import CORS
 from flask_graphql import GraphQLView
 import os
 from datetime import datetime
+import bleach
 
 # Import GraphQL schema
 from schema import app as flask_app, db, schema
@@ -39,8 +40,77 @@ CORS(app, supports_credentials=True,
 
 app.secret_key = 'kb_portal_secret_key_2026'
 
-VERSION = "v1.0.3"
+VERSION = "v1.0.4"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+# CSRF Protection - Allowed origins for CSRF checks
+CSRF_ALLOWED_ORIGINS = [
+    'http://192.168.140.149:3003',
+    'http://localhost:3003',
+    'http://127.0.0.1:3003',
+    'http://192.168.140.149:3004',
+    'http://localhost:3004',
+    'http://127.0.0.1:3004',
+]
+
+def generate_csrf_token():
+    import sys
+    print(f"DEBUG: generate_csrf_token called, session keys: {list(session.keys())}", file=sys.stderr)
+    """Generate a CSRF token for the session"""
+    import secrets
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return session['csrf_token']
+
+def validate_csrf_request():
+    """Validate CSRF token for state-changing requests"""
+    # Only check CSRF for state-changing requests
+    if request.method not in ['POST', 'PUT', 'DELETE', 'PATCH']:
+        return True, None
+    
+    # Skip CSRF check for login endpoint (open to all)
+    if request.path == '/login':
+        return True, None
+    
+    # Check Origin header for cross-site prevention (only for browser requests)
+    origin = request.headers.get('Origin') or request.headers.get('Referer')
+    if origin:
+        # Parse origin to check if it's in our allowed list
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        allowed_origin = f"{parsed.scheme}://{parsed.netloc}"
+        if allowed_origin not in CSRF_ALLOWED_ORIGINS:
+            return False, "Invalid origin"
+    
+    # Validate CSRF token for authenticated users
+    if session.get('logged_in'):
+        # Check X-CSRF-Token header or _csrf form field
+        token = None
+        if request.is_json:
+            data = request.get_json(silent=True)
+            if data:
+                token = data.get('_csrf')
+        if not token:
+            token = request.headers.get('X-CSRF-Token')
+        if not token:
+            token = request.form.get('_csrf')
+        
+        session_token = session.get('csrf_token')
+        if not session_token or token != session_token:
+            return False, "Invalid CSRF token"
+    
+    return True, None
+
+# Make CSRF token available in templates
+@app.before_request
+def csrf_protect():
+    """CSRF protection before each request"""
+    import sys
+    print(f"DEBUG csrf_protect: method={request.method} path={request.path} session_keys={list(request.cookies.keys())}", file=sys.stderr)
+    is_valid, error = validate_csrf_request()
+    print(f"DEBUG validate_csrf_request: is_valid={is_valid} error={error} session_logged_in={session.get('logged_in')} csrf_token={session.get('csrf_token')}", file=sys.stderr)
+    if not is_valid:
+        return jsonify({'error': f'CSRF validation failed: {error}', 'code': 'CSRF_ERROR'}), 403
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "afe2026"
@@ -166,6 +236,22 @@ LOGIN_TEMPLATE = '''
 </html>
 '''
 
+# Allowed HTML tags for article content (XSS prevention)
+ALLOWED_HTML_TAGS = ['p', 'br', 'b', 'i', 'u', 'strong', 'em', 'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'code', 'pre', 'blockquote']
+ALLOWED_HTML_ATTRS = {'a': ['href', 'title', 'class'], 'code': ['class'], 'pre': ['class']}
+
+def sanitize_html(text):
+    """Sanitize HTML content to prevent XSS attacks"""
+    if not text:
+        return text
+    return bleach.clean(text, tags=ALLOWED_HTML_TAGS, attributes=ALLOWED_HTML_ATTRS, strip=True)
+
+def sanitize_plain_text(text):
+    """Sanitize plain text - strip all HTML tags"""
+    if not text:
+        return text
+    return bleach.clean(text, tags=[], strip=True)
+
 DASHBOARD_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
@@ -284,6 +370,7 @@ DASHBOARD_TEMPLATE = '''
     </div>
     <script>
         const GRAPHQL_ENDPOINT = '/graphql';
+        const CSRF_TOKEN = '{{ csrf_token }}';
         
         async function fetchStats() {
             const query = `query {
@@ -295,7 +382,10 @@ DASHBOARD_TEMPLATE = '''
             try {
                 const response = await fetch(GRAPHQL_ENDPOINT, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': CSRF_TOKEN
+                    },
                     body: JSON.stringify({ query })
                 });
                 const data = await response.json();
@@ -314,7 +404,10 @@ DASHBOARD_TEMPLATE = '''
             try {
                 const resp = await fetch(GRAPHQL_ENDPOINT, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': CSRF_TOKEN
+                    },
                     body: JSON.stringify({ query: pubQuery })
                 });
                 const d = await resp.json();
@@ -343,7 +436,10 @@ DASHBOARD_TEMPLATE = '''
             try {
                 const response = await fetch(GRAPHQL_ENDPOINT, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': CSRF_TOKEN
+                    },
                     body: JSON.stringify({ query })
                 });
                 const data = await response.json();
@@ -352,10 +448,10 @@ DASHBOARD_TEMPLATE = '''
                     const tbody = document.getElementById('recentArticles');
                     tbody.innerHTML = data.data.allArticles.edges.map(edge => `
                         <tr>
-                            <td>${edge.node.title || 'Untitled'}</td>
-                            <td>${edge.node.categoryId || '-'}</td>
-                            <td>${edge.node.author || '-'}</td>
-                            <td><span class="status ${edge.node.status}">${edge.node.status || 'draft'}</span></td>
+                            <td>${escapeHtml(edge.node.title) || 'Untitled'}</td>
+                            <td>${escapeHtml(edge.node.categoryId) || '-'}</td>
+                            <td>${escapeHtml(edge.node.author) || '-'}</td>
+                            <td><span class="status ${edge.node.status}">${escapeHtml(edge.node.status) || 'draft'}</span></td>
                             <td>${edge.node.updatedAt ? new Date(edge.node.updatedAt).toLocaleDateString() : '-'}</td>
                         </tr>
                     `).join('');
@@ -363,6 +459,13 @@ DASHBOARD_TEMPLATE = '''
             } catch (e) {
                 console.error('Error fetching articles:', e);
             }
+        }
+        
+        // XSS prevention - escape HTML
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return text.replace(/[&<>"']/g, m => map[m]);
         }
         
         fetchStats();
@@ -375,7 +478,7 @@ DASHBOARD_TEMPLATE = '''
 @app.route('/')
 @require_login
 def index():
-    return render_template_string(DASHBOARD_TEMPLATE, version=VERSION, build_date=BUILD_DATE, username=session.get('username', 'Admin'))
+    return render_template_string(DASHBOARD_TEMPLATE, version=VERSION, build_date=BUILD_DATE, username=session.get('username', 'Admin'), csrf_token=generate_csrf_token())
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -396,6 +499,9 @@ def login():
             session['logged_in'] = True
             session['username'] = username
             
+            # Generate CSRF token for state-changing requests
+            csrf_token = generate_csrf_token()
+            
             # Generate JWT token for REST API
             token = generate_token(username)
             
@@ -404,6 +510,7 @@ def login():
                 return jsonify({
                     'success': True,
                     'token': token,
+                    'csrf_token': csrf_token,
                     'user': {'username': username}
                 })
             
@@ -425,6 +532,16 @@ def login():
 def logout():
     session.clear()
     return redirect('/login')
+
+# CSRF Token endpoint - returns CSRF token for authenticated users
+@app.route('/api/csrf-token', methods=['GET'])
+def get_csrf_token():
+    """Get CSRF token for authenticated users"""
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    token = generate_csrf_token()
+    return jsonify({'csrf_token': token})
 
 # API endpoints for Next.js frontend
 @app.route('/api/articles', methods=['GET', 'POST'])
@@ -457,12 +574,13 @@ def api_articles():
         if not data.get('title'):
             return jsonify({'error': 'Title is required'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         article = Article(
-            title=data['title'],
-            content=data.get('content', ''),
-            author=data.get('author', ''),
+            title=sanitize_plain_text(data['title']),
+            content=sanitize_html(data.get('content', '')),
+            author=sanitize_plain_text(data.get('author', '')),
             status=data.get('status', 'draft'),
-            tags=data.get('tags', ''),
+            tags=sanitize_plain_text(data.get('tags', '')),
             category_id=data.get('categoryId'),
             view_count=0
         )
@@ -512,16 +630,17 @@ def api_article(article_id):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         if 'title' in data:
-            article.title = data['title']
+            article.title = sanitize_plain_text(data['title'])
         if 'content' in data:
-            article.content = data['content']
+            article.content = sanitize_html(data['content'])
         if 'author' in data:
-            article.author = data['author']
+            article.author = sanitize_plain_text(data['author'])
         if 'status' in data:
             article.status = data['status']
         if 'tags' in data:
-            article.tags = data['tags']
+            article.tags = sanitize_plain_text(data['tags'])
         if 'categoryId' in data:
             article.category_id = data['categoryId']
         
@@ -568,9 +687,10 @@ def api_categories():
         if not data.get('name'):
             return jsonify({'error': 'Name is required'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         category = Category(
-            name=data['name'],
-            description=data.get('description', ''),
+            name=sanitize_plain_text(data['name']),
+            description=sanitize_plain_text(data.get('description', '')),
             parent_id=data.get('parentId')
         )
         
@@ -607,10 +727,11 @@ def api_category(category_id):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         if 'name' in data:
-            category.name = data['name']
+            category.name = sanitize_plain_text(data['name'])
         if 'description' in data:
-            category.description = data['description']
+            category.description = sanitize_plain_text(data['description'])
         if 'parentId' in data:
             category.parent_id = data['parentId']
         
@@ -650,9 +771,10 @@ def api_tags():
         if not data.get('name'):
             return jsonify({'error': 'Name is required'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         tag = Tag(
-            name=data['name'],
-            description=data.get('description', '')
+            name=sanitize_plain_text(data['name']),
+            description=sanitize_plain_text(data.get('description', ''))
         )
         
         db.session.add(tag)
@@ -686,10 +808,11 @@ def api_tag(tag_id):
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
+        # XSS Prevention - Sanitize all user inputs
         if 'name' in data:
-            tag.name = data['name']
+            tag.name = sanitize_plain_text(data['name'])
         if 'description' in data:
-            tag.description = data['description']
+            tag.description = sanitize_plain_text(data['description'])
         
         db.session.commit()
         

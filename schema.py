@@ -267,11 +267,11 @@ class CreateArticle(graphene.Mutation):
         db.session.add(article)
         db.session.commit()
         
-        # Create initial revision
+        # Create initial revision - use SANITIZED values to prevent XSS
         revision = ArticleRevision(
             article_id=article.id,
-            title=title,
-            content=content,
+            title=sanitized_title,
+            content=sanitized_content,
             author=author,
             revision_note='Initial creation'
         )
@@ -306,11 +306,11 @@ class UpdateArticle(graphene.Mutation):
             sanitized_content = sanitize_input(content) if content else None
             sanitized_tags = sanitize_input(tags) if tags else None
             
-            # Create revision before updating
+            # Create revision before updating - use SANITIZED values to prevent XSS
             revision = ArticleRevision(
                 article_id=article.id,
-                title=article.title,
-                content=article.content,
+                title=sanitize_input(article.title) if article.title else None,
+                content=sanitize_input(article.content) if article.content else None,
                 author=author,
                 revision_note=revision_note or 'Updated'
             )
