@@ -19,6 +19,7 @@ elif os.environ.get('DEPLOY_PORT'):
 
 from flask import Flask, render_template_string, request, redirect, url_for, g, session, jsonify, send_from_directory, make_response
 import secrets
+import html
 from flask_cors import CORS
 from flask_graphql import GraphQLView
 import os
@@ -495,11 +496,11 @@ def api_articles():
             return jsonify({'error': 'Title is required'}), 400
         
         article = Article(
-            title=data['title'],
-            content=data.get('content', ''),
-            author=data.get('author', ''),
+            title=html.escape(data['title']),
+            content=html.escape(data.get('content', '')),
+            author=html.escape(data.get('author', '')),
             status=data.get('status', 'draft'),
-            tags=data.get('tags', ''),
+            tags=html.escape(data.get('tags', '')),
             category_id=data.get('categoryId'),
             view_count=0
         )
@@ -550,15 +551,15 @@ def api_article(article_id):
             return jsonify({'error': 'No data provided'}), 400
         
         if 'title' in data:
-            article.title = data['title']
+            article.title = html.escape(data['title'])
         if 'content' in data:
-            article.content = data['content']
+            article.content = html.escape(data['content'])
         if 'author' in data:
-            article.author = data['author']
+            article.author = html.escape(data['author'])
         if 'status' in data:
             article.status = data['status']
         if 'tags' in data:
-            article.tags = data['tags']
+            article.tags = html.escape(data['tags'])
         if 'categoryId' in data:
             article.category_id = data['categoryId']
         
@@ -606,8 +607,8 @@ def api_categories():
             return jsonify({'error': 'Name is required'}), 400
         
         category = Category(
-            name=data['name'],
-            description=data.get('description', ''),
+            name=html.escape(data['name']),
+            description=html.escape(data.get('description', '')),
             parent_id=data.get('parentId')
         )
         
@@ -645,9 +646,9 @@ def api_category(category_id):
             return jsonify({'error': 'No data provided'}), 400
         
         if 'name' in data:
-            category.name = data['name']
+            category.name = html.escape(data['name'])
         if 'description' in data:
-            category.description = data['description']
+            category.description = html.escape(data['description'])
         if 'parentId' in data:
             category.parent_id = data['parentId']
         
@@ -688,8 +689,8 @@ def api_tags():
             return jsonify({'error': 'Name is required'}), 400
         
         tag = Tag(
-            name=data['name'],
-            description=data.get('description', '')
+            name=html.escape(data['name']),
+            description=html.escape(data.get('description', ''))
         )
         
         db.session.add(tag)
@@ -724,9 +725,9 @@ def api_tag(tag_id):
             return jsonify({'error': 'No data provided'}), 400
         
         if 'name' in data:
-            tag.name = data['name']
+            tag.name = html.escape(data['name'])
         if 'description' in data:
-            tag.description = data['description']
+            tag.description = html.escape(data['description'])
         
         db.session.commit()
         
