@@ -18,6 +18,7 @@ elif os.environ.get('DEPLOY_PORT'):
     DEPLOY_PORT = int(os.environ.get('DEPLOY_PORT'))
 
 from flask import Flask, render_template_string, request, redirect, url_for, g, session, jsonify, send_from_directory, make_response
+import secrets
 from flask_cors import CORS
 from flask_graphql import GraphQLView
 import os
@@ -39,7 +40,7 @@ CORS(app, supports_credentials=True,
 
 app.secret_key = 'kb_portal_secret_key_2026'
 
-VERSION = "v1.0.2"
+VERSION = "v1.0.4"
 BUILD_DATE = datetime.now().strftime('%Y-%m-%d %H:%M')
 
 ADMIN_USERNAME = "admin"
@@ -422,6 +423,46 @@ def logout():
     session.clear()
     return redirect('/login')
 
+# API Auth endpoints for Next.js frontend
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    """REST API login endpoint - returns token + csrfToken"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        session['logged_in'] = True
+        session['username'] = username
+        
+        # Generate JWT token
+        token = generate_token(username)
+        
+        # Generate CSRF token
+        csrf_token = secrets.token_hex(32)
+        session['csrf_token'] = csrf_token
+        
+        return jsonify({
+            'success': True,
+            'token': token,
+            'csrfToken': csrf_token,
+            'user': {'username': username}
+        })
+    else:
+        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    """REST API logout endpoint"""
+    session.clear()
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
+
 # API endpoints for Next.js frontend
 @app.route('/api/articles', methods=['GET', 'POST'])
 @jwt_required
@@ -725,6 +766,10 @@ def api_stats():
 
 @app.route('/health')
 def health():
+    return jsonify({'status': 'ok', 'version': VERSION, 'port': DEPLOY_PORT})
+
+@app.route('/api/health')
+def api_health():
     return jsonify({'status': 'ok', 'version': VERSION, 'port': DEPLOY_PORT})
 
 if __name__ == '__main__':
