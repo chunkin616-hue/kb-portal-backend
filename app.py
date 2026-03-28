@@ -580,7 +580,7 @@ def api_article(article_id):
     elif request.method == 'DELETE':
         db.session.delete(article)
         db.session.commit()
-        return jsonify({'success': True, 'message': 'Article deleted'})
+        return '', 204
 
 @app.route('/api/categories', methods=['GET', 'POST'])
 @jwt_required
@@ -663,7 +663,7 @@ def api_category(category_id):
     elif request.method == 'DELETE':
         db.session.delete(category)
         db.session.commit()
-        return jsonify({'success': True, 'message': 'Category deleted'})
+        return '', 204
 
 @app.route('/api/tags', methods=['GET', 'POST'])
 @jwt_required
@@ -739,7 +739,7 @@ def api_tag(tag_id):
     elif request.method == 'DELETE':
         db.session.delete(tag)
         db.session.commit()
-        return jsonify({'success': True, 'message': 'Tag deleted'})
+        return '', 204
 
 @app.route('/api/stats', methods=['GET'])
 @jwt_required
