@@ -82,6 +82,21 @@ def require_login(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# CSRF protection decorator for REST API mutating endpoints
+def csrf_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check for CSRF token in X-CSRF-Token header
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
 LOGIN_TEMPLATE = '''
 <!DOCTYPE html>
 <html>
@@ -486,6 +501,12 @@ def api_articles():
         } for a in articles])
     
     elif request.method == 'POST':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Create new article
         data = request.get_json()
         if not data:
@@ -545,6 +566,12 @@ def api_article(article_id):
         })
     
     elif request.method == 'PUT':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Update article
         data = request.get_json()
         if not data:
@@ -579,6 +606,12 @@ def api_article(article_id):
         })
     
     elif request.method == 'DELETE':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         db.session.delete(article)
         db.session.commit()
         return '', 204
@@ -598,6 +631,12 @@ def api_categories():
         } for c in categories])
     
     elif request.method == 'POST':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Create new category
         data = request.get_json()
         if not data:
@@ -640,6 +679,12 @@ def api_category(category_id):
         })
     
     elif request.method == 'PUT':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Update category
         data = request.get_json()
         if not data:
@@ -662,6 +707,12 @@ def api_category(category_id):
         })
     
     elif request.method == 'DELETE':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         db.session.delete(category)
         db.session.commit()
         return '', 204
@@ -680,6 +731,12 @@ def api_tags():
         } for t in tags])
     
     elif request.method == 'POST':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Create new tag
         data = request.get_json()
         if not data:
@@ -719,6 +776,12 @@ def api_tag(tag_id):
         })
     
     elif request.method == 'PUT':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         # Update tag
         data = request.get_json()
         if not data:
@@ -738,6 +801,12 @@ def api_tag(tag_id):
         })
     
     elif request.method == 'DELETE':
+        # Validate CSRF token
+        token = request.headers.get('X-CSRF-Token')
+        expected_token = session.get('csrf_token')
+        if not token or not expected_token or token != expected_token:
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
+
         db.session.delete(tag)
         db.session.commit()
         return '', 204
