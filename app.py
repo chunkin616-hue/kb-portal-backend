@@ -811,6 +811,37 @@ def api_tag(tag_id):
         db.session.commit()
         return '', 204
 
+@app.route('/api/search', methods=['GET'])
+@jwt_required
+def api_search():
+    from schema import Article
+    
+    q = request.args.get('q', '')
+    if not q:
+        return jsonify([])
+    
+    # Search in articles title/content using ILIKE (case-insensitive)
+    search_pattern = f'%{q}%'
+    articles = Article.query.filter(
+        db.or_(
+            Article.title.ilike(search_pattern),
+            Article.content.ilike(search_pattern)
+        )
+    ).order_by(Article.updated_at.desc()).limit(50).all()
+    
+    return jsonify([{
+        'id': a.id,
+        'title': a.title,
+        'content': a.content,
+        'author': a.author,
+        'status': a.status,
+        'tags': a.tags,
+        'viewCount': a.view_count,
+        'categoryId': a.category_id,
+        'createdAt': a.created_at,
+        'updatedAt': a.updated_at
+    } for a in articles])
+
 @app.route('/api/stats', methods=['GET'])
 @jwt_required
 def api_stats():
