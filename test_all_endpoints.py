@@ -6,7 +6,7 @@ BASE_URL = "http://localhost:5003"
 
 def get_token():
     """Get JWT token by logging in"""
-    response = requests.post(
+    response = requests.post(timeout=10)
         f"{BASE_URL}/login",
         json={"username": "admin", "password": "afe2026"},
         headers={"Content-Type": "application/json"}
@@ -23,9 +23,9 @@ def test_endpoint(method, url, data=None, token=None, expected_status=None):
         headers["Authorization"] = f"Bearer {token}"
     
     if method == "GET":
-        response = requests.get(url, headers=headers)
+        response = requests.get(timeout=10)url, headers=headers)
     elif method == "POST":
-        response = requests.post(url, json=data, headers=headers)
+        response = requests.post(timeout=10)url, json=data, headers=headers)
     elif method == "PUT":
         response = requests.put(url, json=data, headers=headers)
     elif method == "DELETE":
