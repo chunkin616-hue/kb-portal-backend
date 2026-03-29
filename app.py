@@ -822,7 +822,7 @@ def api_search():
     
     q = request.args.get('q', '')
     if not q:
-        return jsonify([])
+        return jsonify({'results': [], 'count': 0})
     
     # Search in articles title/content using ILIKE (case-insensitive)
     search_pattern = f'%{q}%'
@@ -833,18 +833,21 @@ def api_search():
         )
     ).order_by(Article.updated_at.desc()).limit(50).all()
     
-    return jsonify([{
-        'id': a.id,
-        'title': a.title,
-        'content': a.content,
-        'author': a.author,
-        'status': a.status,
-        'tags': a.tags,
-        'viewCount': a.view_count,
-        'categoryId': a.category_id,
-        'createdAt': a.created_at,
-        'updatedAt': a.updated_at
-    } for a in articles])
+    return jsonify({
+        'results': [{
+            'id': a.id,
+            'title': a.title,
+            'content': a.content,
+            'author': a.author,
+            'status': a.status,
+            'tags': a.tags,
+            'viewCount': a.view_count,
+            'categoryId': a.category_id,
+            'createdAt': a.created_at,
+            'updatedAt': a.updated_at
+        } for a in articles],
+        'count': len(articles)
+    })
 
 @app.route('/api/stats', methods=['GET'])
 @jwt_required

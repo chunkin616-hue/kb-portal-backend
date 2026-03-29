@@ -195,7 +195,12 @@ class CreateCategory(graphene.Mutation):
     @staticmethod
     @require_login
     def mutate(root, info, name, description=None, parent_id=None):
-        category = Category(name=name, description=description, parent_id=parent_id)
+        import html
+        category = Category(
+            name=html.escape(name),
+            description=html.escape(description) if description else None,
+            parent_id=parent_id
+        )
         db.session.add(category)
         db.session.commit()
         return CreateCategory(category=category)
@@ -211,12 +216,13 @@ class UpdateCategory(graphene.Mutation):
     @staticmethod
     @require_login
     def mutate(root, info, id, name=None, description=None):
+        import html
         category = Category.query.get(id)
         if category:
             if name:
-                category.name = name
+                category.name = html.escape(name)
             if description:
-                category.description = description
+                category.description = html.escape(description)
             category.updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             db.session.commit()
         return UpdateCategory(category=category)
