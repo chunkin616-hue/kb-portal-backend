@@ -1,5 +1,6 @@
 import jwt
 import datetime
+import secrets
 from functools import wraps
 from flask import request, jsonify, current_app
 
@@ -8,10 +9,15 @@ JWT_SECRET_KEY = 'kb_portal_jwt_secret_2026'
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_HOURS = 24
 
+# In-memory token blacklist (set of jti values)
+# For production, use Redis or DB-backed blacklist
+_token_blacklist = set()
+
 def generate_token(username):
     """Generate JWT token for a user"""
     payload = {
         'username': username,
+        'jti': secrets.token_hex(16),  # unique token id for blacklist tracking
         'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=JWT_EXPIRATION_HOURS),
         'iat': datetime.datetime.utcnow()
     }
@@ -22,11 +28,23 @@ def verify_token(token):
     """Verify JWT token and return payload if valid"""
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        # Check if token is blacklisted
+        if payload.get('jti') in _token_blacklist:
+            return None
         return payload
     except jwt.ExpiredSignatureError:
         return None  # Token expired
     except jwt.InvalidTokenError:
         return None  # Invalid token
+
+def blacklist_token(token):
+    """Add a token to the blacklist (call on logout)"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM], options={"verify_exp": False})
+        if payload.get('jti'):
+            _token_blacklist.add(payload['jti'])
+    except jwt.InvalidTokenError:
+        pass
 
 def jwt_required(f):
     """Decorator to require JWT authentication for REST API endpoints"""

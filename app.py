@@ -48,7 +48,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "afe2026"
 
 # Import JWT authentication
-from jwt_auth import jwt_required, generate_token, verify_token
+from jwt_auth import jwt_required, generate_token, verify_token, blacklist_token
 
 # Add GraphQL endpoint with authentication
 class AuthGraphQLView(GraphQLView):
@@ -476,6 +476,11 @@ def api_auth_login():
 @app.route('/api/auth/logout', methods=['POST'])
 def api_auth_logout():
     """REST API logout endpoint"""
+    # Blacklist the JWT token if present
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+        blacklist_token(token)
     session.clear()
     return jsonify({'success': True, 'message': 'Logged out successfully'})
 
@@ -486,10 +491,22 @@ def api_articles():
     from schema import Article, Category, Tag
     
     if request.method == 'GET':
+        page = request.args.get('page', type=int)
         limit = request.args.get('limit', type=int)
+        
+        # BUG-013 fix: validate page >= 1
+        if page is not None and page < 1:
+            return jsonify({'error': 'page must be >= 1'}), 400
+        
         query = Article.query.order_by(Article.updated_at.desc())
-        if limit is not None and limit > 0:
+        
+        # Apply page-based pagination
+        if page is not None and limit is not None and limit > 0:
+            offset = (page - 1) * limit
+            query = query.limit(limit).offset(offset)
+        elif limit is not None and limit > 0:
             query = query.limit(limit)
+        
         articles = query.all()
         return jsonify([{
             'id': a.id,
@@ -649,8 +666,14 @@ def api_categories():
         if not data.get('name'):
             return jsonify({'error': 'Name is required'}), 400
         
+        # BUG-011 fix: Check for duplicate category name
+        escaped_name = html.escape(data['name'])
+        existing = Category.query.filter_by(name=escaped_name).first()
+        if existing:
+            return jsonify({'error': 'Category with this name already exists'}), 409
+        
         category = Category(
-            name=html.escape(data['name']),
+            name=escaped_name,
             description=html.escape(data.get('description', '')),
             parent_id=data.get('parentId')
         )
@@ -749,13 +772,19 @@ def api_tags():
         if not data.get('name'):
             return jsonify({'error': 'Name is required'}), 400
         
+        # BUG-012 fix: Catch unique constraint violation for duplicate tag name
+        from sqlalchemy.exc import IntegrityError
         tag = Tag(
             name=html.escape(data['name']),
             description=html.escape(data.get('description', ''))
         )
         
-        db.session.add(tag)
-        db.session.commit()
+        try:
+            db.session.add(tag)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return jsonify({'error': 'Tag with this name already exists'}), 409
         
         return jsonify({
             'id': tag.id,
@@ -836,11 +865,11 @@ def api_search():
     return jsonify({
         'results': [{
             'id': a.id,
-            'title': a.title,
-            'content': a.content,
-            'author': a.author,
+            'title': html.escape(a.title or ''),
+            'content': html.escape(a.content or ''),
+            'author': html.escape(a.author or ''),
             'status': a.status,
-            'tags': a.tags,
+            'tags': html.escape(a.tags or ''),
             'viewCount': a.view_count,
             'categoryId': a.category_id,
             'createdAt': a.created_at,

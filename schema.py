@@ -196,8 +196,13 @@ class CreateCategory(graphene.Mutation):
     @require_login
     def mutate(root, info, name, description=None, parent_id=None):
         import html
+        escaped_name = html.escape(name)
+        # BUG-011 fix: Check for duplicate category name
+        existing = Category.query.filter_by(name=escaped_name).first()
+        if existing:
+            raise Exception('Category with this name already exists')
         category = Category(
-            name=html.escape(name),
+            name=escaped_name,
             description=html.escape(description) if description else None,
             parent_id=parent_id
         )
@@ -365,9 +370,15 @@ class CreateTag(graphene.Mutation):
     @staticmethod
     @require_login
     def mutate(root, info, name, description=None):
+        # BUG-012 fix: Catch unique constraint violation for duplicate tag name
+        from sqlalchemy.exc import IntegrityError
         tag = Tag(name=name, description=description)
-        db.session.add(tag)
-        db.session.commit()
+        try:
+            db.session.add(tag)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            raise Exception('Tag with this name already exists')
         return CreateTag(tag=tag)
 
 class DeleteTag(graphene.Mutation):
